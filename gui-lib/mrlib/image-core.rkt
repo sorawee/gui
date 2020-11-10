@@ -1,5 +1,4 @@
 #lang racket/base
-
 #|
 
 This library is the part of the 2htdp/image 
@@ -121,8 +120,9 @@ has been moved out).
 
 ;; a np-atomic-shape is:
 ;;
-;;  - (make-ellipse width height angle mode color)
-(define-struct/reg-mk ellipse (width height angle mode color) #:transparent #:omit-define-syntaxes)
+;;  - (make-ellipse width height angle mode color (or/c #f angle))
+(define-struct/reg-mk ellipse (width height angle mode color wedge)
+  #:transparent #:omit-define-syntaxes)
 ;;
 ;;  - (make-text string angle number color
 ;;               number (or/c #f string) family 
@@ -513,7 +513,7 @@ has been moved out).
   (define lst (parse (fetch bytes)))
   (cond
     [(not lst)
-     (make-image (make-translate 50 50 (make-ellipse 100 100 0 'solid "black"))
+     (make-image (make-translate 50 50 (make-ellipse 100 100 0 'solid "black" #f))
                  (make-bb 100 100 100)
                  #f
                  #f)]
@@ -585,6 +585,12 @@ has been moved out).
                                                0 0)]
                            [else p])))
                      (apply constructor adjusted-points (cdr parsed-args))]
+                    [(and constructor
+                          (equal? tag 'struct:ellipse)
+                          (= arg-count 5))
+                     ;; some save files from older versions do not have the wedge
+                     ;; field for the ellipses, but it should be #f in that case
+                     (apply constructor (append parsed-args '(#f)))]
                     [(and constructor (procedure-arity-includes? constructor arg-count))
                      (apply constructor parsed-args)]
                     [(and (eq? tag 'struct:bitmap)
@@ -776,7 +782,8 @@ has been moved out).
                       (* y-scale (ellipse-height shape))
                       (ellipse-angle shape)
                       (ellipse-mode shape)
-                      (scale-color (ellipse-color shape) x-scale y-scale))]
+                      (scale-color (ellipse-color shape) x-scale y-scale)
+                      (ellipse-wedge shape))]
        [else
         (define-values (ew eh θ)
           (scale-rotated-ellipse x-scale y-scale
@@ -785,7 +792,8 @@ has been moved out).
                                  (ellipse-angle shape)))
         (make-ellipse ew eh θ
                       (ellipse-mode shape)
-                      (scale-color (ellipse-color shape) x-scale y-scale))])]
+                      (scale-color (ellipse-color shape) x-scale y-scale)
+                      (ellipse-wedge shape))])]
     [(text? shape)
      ;; should probably do something different here so that
      ;; the y-scale is always greater than 1
@@ -1175,15 +1183,22 @@ has been moved out).
             [eh (ellipse-height np-atomic-shape)]
             [θ (degrees->radians (ellipse-angle np-atomic-shape))]
             [color (ellipse-color np-atomic-shape)]
-            [mode (ellipse-mode np-atomic-shape)])
-       (let-values ([(rotated-width rotated-height) (ellipse-rotated-size ew eh θ)])
-         (send path ellipse 0 0 ew eh)
-         (send path translate (- (/ ew 2)) (- (/ eh 2)))
-         (send path rotate θ)
-         (send dc set-pen (mode-color->pen mode color))
-         (send dc set-brush (mode-color->brush mode color))
-         (send dc set-smoothing (mode-color->smoothing mode color))
-         (send dc draw-path path dx dy)))]
+            [mode (ellipse-mode np-atomic-shape)]
+            [wedge (ellipse-wedge np-atomic-shape)])
+       (cond
+         [wedge
+          (send path move-to (/ ew 2) (/ eh 2))
+          (send path arc 0 0 ew eh 0 (degrees->radians wedge))
+          (send path move-to (/ ew 2) (/ eh 2))
+          (send path close)]
+         [else
+          (send path ellipse 0 0 ew eh)])
+       (send path translate (- (/ ew 2)) (- (/ eh 2)))
+       (send path rotate θ)
+       (send dc set-pen (mode-color->pen mode color))
+       (send dc set-brush (mode-color->brush mode color))
+       (send dc set-smoothing (mode-color->smoothing mode color))
+       (send dc draw-path path dx dy))]
     [(flip? np-atomic-shape) 
      (cond
        [(flip-flipped? np-atomic-shape)
@@ -1466,13 +1481,18 @@ the mask bitmap and the original bitmap are all together in a single bytes!
      (values (* (sin θ) eh)
              (* (cos θ) eh))]
     [else
-     (let* ([t1 (atan (/ eh ew (exact->inexact (tan θ))))]
-            ; a*cos(t1),b*sin(t1) is the point on *original* ellipse which gets rotated to top.
-            [t2 (atan (/ (* (- eh) (tan θ)) ew))] ; the original point rotated to right side.
-            [rotated-height (+ (* ew (sin θ) (cos t1)) (* eh (cos θ) (sin t1)))]
-            [rotated-width  (- (* ew (cos θ) (cos t2)) (* eh (sin θ) (sin t2)))])
-       (values (abs rotated-width)
-               (abs rotated-height)))]))
+     (define-values (t1 t2) (ellipse-angle-of-widest-points ew eh θ))
+     (define rotated-height (+ (* ew (sin θ) (cos t1)) (* eh (cos θ) (sin t1))))
+     (define rotated-width  (- (* ew (cos θ) (cos t2)) (* eh (sin θ) (sin t2))))
+     (values (abs rotated-width)
+             (abs rotated-height))]))
+
+(define (ellipse-angle-of-widest-points ew eh θ)
+  ; a*cos(t1),b*sin(t1) is the point on *original* ellipse which gets rotated to top.
+  (define t1 (atan (/ eh ew (exact->inexact (tan θ)))))
+  ; the original point rotated to right side.
+  (define t2 (atan (/ (* (- eh) (tan θ)) ew)))
+  (values t1 t2))
 
 (define (mode-color->smoothing mode color)
   (cond
@@ -1676,7 +1696,7 @@ the mask bitmap and the original bitmap are all together in a single bytes!
          make-translate translate? translate-dx translate-dy translate-shape
          make-scale scale? scale-x scale-y scale-shape
          make-crop crop? crop-points crop-shape
-         make-ellipse ellipse? ellipse-width ellipse-height ellipse-angle ellipse-mode ellipse-color
+         make-ellipse ellipse? ellipse-width ellipse-height ellipse-angle ellipse-mode ellipse-color ellipse-wedge
          make-text text? text-string text-angle text-y-scale text-color
          text-angle text-size text-face text-family text-style text-weight text-underline
          (contract-out [rename construct-polygon make-polygon
@@ -1698,8 +1718,13 @@ the mask bitmap and the original bitmap are all together in a single bytes!
          (rename-out [-make-color make-color]) 
          
          degrees->radians
+         angle->proper-range
          normalize-shape
          ellipse-rotated-size
+         (contract-out
+          [ellipse-angle-of-widest-points
+           (-> (and/c real? (not/c 0)) (and/c real? (not/c 0)) real?
+               (values real? real?))])
          points->ltrb-values
 
          image?
