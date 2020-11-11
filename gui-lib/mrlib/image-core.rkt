@@ -834,14 +834,20 @@ has been moved out).
 (define (scale-rotated-ellipse x-scale y-scale ew eh angle)
   (define a (/ ew 2))
   (define b (/ eh 2))
+  (define-values (new-a new-b new-angle)
+    (do-scale-rotated-ellipse a b angle x-scale y-scale))
+  (values (* 2 new-a)
+          (* 2 new-b)
+          new-angle))
+
+;; probably inling and then applying various
+;; identities, one can improve this function
+(define (do-scale-rotated-ellipse a b angle x-scale y-scale)
   (define-values (A B C F) (ab-angle->ABCF a b angle))
   (define SA (/ A x-scale x-scale))
   (define SB (/ B x-scale y-scale))
   (define SC (/ C y-scale y-scale))
-  (define-values (new-a new-b new-angle) (ABCF->ab-angle SA SB SC F))
-  (values (* 2 new-a)
-          (* 2 new-b)
-          new-angle))
+  (ABCF->ab-angle SA SB SC F))
 
 ;; these functions use the General Ellipse form from wikipedia
 ;; https://en.wikipedia.org/wiki/Ellipse#General_ellipse
@@ -1482,8 +1488,8 @@ the mask bitmap and the original bitmap are all together in a single bytes!
              (* (cos θ) eh))]
     [else
      (define-values (t1 t2) (ellipse-angle-of-widest-points ew eh θ))
-     (define rotated-height (+ (* ew (sin θ) (cos t1)) (* eh (cos θ) (sin t1))))
-     (define rotated-width  (- (* ew (cos θ) (cos t2)) (* eh (sin θ) (sin t2))))
+     (define rotated-height (* 2 (ellipse-t->y ew eh θ t1)))
+     (define rotated-width  (* 2 (ellipse-t->x ew eh θ t2)))
      (values (abs rotated-width)
              (abs rotated-height))]))
 
@@ -1493,6 +1499,18 @@ the mask bitmap and the original bitmap are all together in a single bytes!
   ; the original point rotated to right side.
   (define t2 (atan (/ (* (- eh) (tan θ)) ew)))
   (values t1 t2))
+
+;; given the ellipse width (ew), height (eh), rotation (θ) and the parameteric input (t)
+;; find the x and y coordinates of the corresponding point on the ellipse
+;; (with an extra - for the `y` to convert to computer coordinates)
+(define (ellipse-t->x ew eh θ t)
+  (define a (/ ew 2))
+  (define b (/ eh 2))
+  (- (* a (cos θ) (cos t)) (* b (sin θ) (sin t))))
+(define (ellipse-t->y ew eh θ t)
+  (define a (/ ew 2))
+  (define b (/ eh 2))
+  (- (+ (* a (sin θ) (cos t)) (* b (cos θ) (sin t)))))
 
 (define (mode-color->smoothing mode color)
   (cond
@@ -1722,6 +1740,12 @@ the mask bitmap and the original bitmap are all together in a single bytes!
          normalize-shape
          ellipse-rotated-size
          (contract-out
+          [ellipse-t->x
+           (-> (and/c real? (not/c 0)) (and/c real? (not/c 0)) real? real?
+               real?)]
+          [ellipse-t->y
+           (-> (and/c real? (not/c 0)) (and/c real? (not/c 0)) real? real?
+               real?)]
           [ellipse-angle-of-widest-points
            (-> (and/c real? (not/c 0)) (and/c real? (not/c 0)) real?
                (values real? real?))])
