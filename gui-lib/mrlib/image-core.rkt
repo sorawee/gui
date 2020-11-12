@@ -776,21 +776,26 @@ has been moved out).
   (-> number? number? np-atomic-shape? np-atomic-shape?)
   (cond
     [(ellipse? shape)
+     (define eh (ellipse-height shape))
+     (define ew (ellipse-width shape))
      (cond
-       [(= (ellipse-angle shape) 0)
-        (make-ellipse (* x-scale (ellipse-width shape))
-                      (* y-scale (ellipse-height shape))
+       [(or (= (ellipse-angle shape) 0)
+            ;; if ew=eh, then this is a circle and the `scale-rotated-ellipse`
+            ;; function won't preserve the wedge's shape (if there is a wedge)
+            ;; so we need to avoid calling it.
+            (= ew eh))
+        (make-ellipse (* x-scale ew)
+                      (* y-scale eh)
                       (ellipse-angle shape)
                       (ellipse-mode shape)
                       (scale-color (ellipse-color shape) x-scale y-scale)
                       (ellipse-wedge shape))]
        [else
-        (define-values (ew eh θ)
+        (define-values (new-ew new-eh new-θ)
           (scale-rotated-ellipse x-scale y-scale
-                                 (ellipse-width shape)
-                                 (ellipse-height shape)
+                                 ew eh
                                  (ellipse-angle shape)))
-        (make-ellipse ew eh θ
+        (make-ellipse new-ew new-eh new-θ
                       (ellipse-mode shape)
                       (scale-color (ellipse-color shape) x-scale y-scale)
                       (ellipse-wedge shape))])]
@@ -901,7 +906,6 @@ has been moved out).
 
   ;; this test makes sure that `angle->proper-range is called`
   (check-within (roundtrip 3 10 33) (list 10 3 303) 0.0001)
-
   )
 
 
@@ -1121,7 +1125,7 @@ has been moved out).
               [this-one (scale-np-atomic x-scale y-scale shape)])
          (render-np-atomic-shape this-one dc dx dy))]
       [else 
-       (error 'normalize-shape "unknown shape ~s\n" shape)])))
+       (error 'render-arbitrary-shape "unknown shape ~s\n" shape)])))
 
 (define/contract (render-poly/line-segment/curve-segment simple-shape dc dx dy)
   (-> (or/c polygon? line-segment? curve-segment?) any/c any/c any/c void?)
@@ -1184,27 +1188,29 @@ has been moved out).
 (define (render-np-atomic-shape np-atomic-shape dc dx dy)
   (cond
     [(ellipse? np-atomic-shape)
-     (let* ([path (new dc-path%)]
-            [ew (ellipse-width np-atomic-shape)]
-            [eh (ellipse-height np-atomic-shape)]
-            [θ (degrees->radians (ellipse-angle np-atomic-shape))]
-            [color (ellipse-color np-atomic-shape)]
-            [mode (ellipse-mode np-atomic-shape)]
-            [wedge (ellipse-wedge np-atomic-shape)])
-       (cond
-         [wedge
-          (send path move-to (/ ew 2) (/ eh 2))
-          (send path arc 0 0 ew eh 0 (degrees->radians wedge))
-          (send path move-to (/ ew 2) (/ eh 2))
-          (send path close)]
-         [else
-          (send path ellipse 0 0 ew eh)])
-       (send path translate (- (/ ew 2)) (- (/ eh 2)))
-       (send path rotate θ)
-       (send dc set-pen (mode-color->pen mode color))
-       (send dc set-brush (mode-color->brush mode color))
-       (send dc set-smoothing (mode-color->smoothing mode color))
-       (send dc draw-path path dx dy))]
+     (define path (new dc-path%))
+     (define ew (ellipse-width np-atomic-shape))
+     (define eh (ellipse-height np-atomic-shape))
+     (define θ (degrees->radians (ellipse-angle np-atomic-shape)))
+     (define color (ellipse-color np-atomic-shape))
+     (define mode (ellipse-mode np-atomic-shape))
+     (define wedge (ellipse-wedge np-atomic-shape))
+     (define cx (/ ew 2))
+     (define cy (/ eh 2))
+     (cond
+       [wedge
+        (send path move-to cx cy)
+        (send path arc 0 0 ew eh 0 (degrees->radians wedge))
+        (send path move-to cx cy)
+        (send path close)]
+       [else
+        (send path ellipse 0 0 ew eh)])
+     (send path translate (- cx) (- cy))
+     (send path rotate θ)
+     (send dc set-pen (mode-color->pen mode color))
+     (send dc set-brush (mode-color->brush mode color))
+     (send dc set-smoothing (mode-color->smoothing mode color))
+     (send dc draw-path path dx dy)]
     [(flip? np-atomic-shape) 
      (cond
        [(flip-flipped? np-atomic-shape)
