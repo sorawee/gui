@@ -1493,13 +1493,13 @@ the mask bitmap and the original bitmap are all together in a single bytes!
      (values (* (sin θ) eh)
              (* (cos θ) eh))]
     [else
-     (define-values (t1 t2) (ellipse-angle-of-widest-points ew eh θ))
-     (define rotated-height (* 2 (ellipse-t->y ew eh θ t1)))
-     (define rotated-width  (* 2 (ellipse-t->x ew eh θ t2)))
+     (define-values (top-t right-t) (ellipse-angle-of-topmost-and-rightmost-points ew eh θ))
+     (define rotated-height (* 2 (ellipse-t->y ew eh θ top-t)))
+     (define rotated-width  (* 2 (ellipse-t->x ew eh θ right-t)))
      (values (abs rotated-width)
              (abs rotated-height))]))
 
-(define (ellipse-angle-of-widest-points ew eh θ)
+(define (ellipse-angle-of-topmost-and-rightmost-points ew eh θ)
   ; a*cos(t1),b*sin(t1) is the point on *original* ellipse which gets rotated to top.
   (define t1 (atan (/ eh ew (exact->inexact (tan θ)))))
   ; the original point rotated to right side.
@@ -1517,6 +1517,30 @@ the mask bitmap and the original bitmap are all together in a single bytes!
   (define a (/ ew 2))
   (define b (/ eh 2))
   (- (+ (* a (sin θ) (cos t)) (* b (cos θ) (sin t)))))
+
+;; given the ellipse width (ew), height (eh) and rotation (θ)
+;; find the parameter (in radians) of the point that's the
+;; widest `x` point
+(define (ellipse-outermost-point-x ew eh θ)
+  (define a (/ ew 2))
+  (define b (/ eh 2))
+  (define cosθ (cos θ))
+  (if (= cosθ 0)
+      0
+      (atan (- (/ (* b (sin θ))
+                  (* a cosθ))))))
+
+;; given the ellipse width (ew), height (eh) and rotation (θ)
+;; find the parameter (in radians) of the point that's the
+;; tallest `y` point
+(define (ellipse-outermost-point-y ew eh θ)
+  (define sinθ (sin θ))
+  (define a (/ ew 2))
+  (define b (/ eh 2))
+  (if (= sinθ 0)
+      (/ pi 2)
+      (- (atan (- (/ (* b (cos θ))
+                     (* a sinθ)))))))
 
 (define (mode-color->smoothing mode color)
   (cond
@@ -1752,9 +1776,10 @@ the mask bitmap and the original bitmap are all together in a single bytes!
           [ellipse-t->y
            (-> (and/c real? (not/c 0)) (and/c real? (not/c 0)) real? real?
                real?)]
-          [ellipse-angle-of-widest-points
-           (-> (and/c real? (not/c 0)) (and/c real? (not/c 0)) real?
-               (values real? real?))])
+          [ellipse-outermost-point-y
+           (-> (and/c real? (not/c 0)) (and/c real? (not/c 0)) real? real?)]
+          [ellipse-outermost-point-x
+           (-> (and/c real? (not/c 0)) (and/c real? (not/c 0)) real? real?)])
          points->ltrb-values
 
          image?
